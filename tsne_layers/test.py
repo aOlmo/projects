@@ -4,7 +4,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.datasets as datasets
 import torch.optim as optim
+import matplotlib.pyplot as plt
 
+from sklearn.manifold import TSNE
 from torch.utils import data as Data
 from torch.autograd import Variable
 from torchvision import transforms
@@ -21,9 +23,10 @@ dataset = datasets.MNIST('./mnist_data',
                         transforms.Normalize((0.1307,), (0.3081,)) # normalize inputs
                         ]))
 
+B_SIZE = 10
 
-train_loader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
-test_loader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
+train_loader = torch.utils.data.DataLoader(dataset, batch_size=B_SIZE, shuffle=True)
+test_loader = torch.utils.data.DataLoader(dataset, batch_size=B_SIZE, shuffle=True)
 
 class CNNClassifier(nn.Module):
     def __init__(self):
@@ -36,30 +39,37 @@ class CNNClassifier(nn.Module):
         self.fc1 = nn.Linear(320, 50)
         self.fc2 = nn.Linear(50, 10)
 
+        self.v = False
 
-    def forward(self, x):
-        # input is 28x28x1
-        # conv1(kernel=5, filters=10) 28x28x10 -> 24x24x10
-        # max_pool(kernel=2) 24x24x10 -> 12x12x10
+    def tSNE_visualize(self, x, y, title):
+        x_np = x.view((B_SIZE, -1)).detach().numpy()
+        x_embed = TSNE(n_components=2).fit_transform(x_np)
 
-        # Do not be afraid of F's - those are just functional wrappers for modules form nn package
-        # Please, see for yourself - http://pytorch.org/docs/_modules/torch/nn/functional.html
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+        plt.scatter(x_embed[:, 0], x_embed[:, 1], s=300, c=y)
+        plt.title(title)
+        plt.show()
 
+    def forward(self, x, y):
 
+        x = self.conv1(x)
+        if self.v:
+            self.tSNE_visualize(x, y, "Layer 1")
+
+        x = F.relu(F.max_pool2d(x, 2))
         x = F.relu(F.max_pool2d(self.dropout(self.conv2(x)), 2))
-        # conv2(kernel=5, filters=20) 12x12x20 -> 8x8x20
-        # max_pool(kernel=2) 8x8x20 -> 4x4x20
 
-        # flatten 4x4x20 = 320
+        if self.v:
+            self.tSNE_visualize(x, y, "Layer 2")
+
         x = x.view(-1, 320)
 
-        # 320 -> 50
         x = F.relu(self.fc1(x))
         x = F.dropout(x, training=self.training)
-
-        # 50 -> 10
         x = self.fc2(x)
+
+        if self.v:
+            self.tSNE_visualize(x, y, "Layer 3")
+            self.v = False
 
         # transform to logits
         return F.log_softmax(x)
@@ -67,13 +77,15 @@ class CNNClassifier(nn.Module):
 def train(epoch):
     model.train() # We have to do this because of Dropout
 
+    model.v = True
+
     for batch_id, (data, label) in enumerate(train_loader):
         data = Variable(data)
         target = Variable(label)
 
         # forward pass, calculate loss and backprop!
         opt.zero_grad()
-        preds = model(data)
+        preds = model(data, target)
         loss = F.nll_loss(preds, target)
         loss.backward()
         loss_history.append(loss.data)
@@ -102,7 +114,7 @@ if __name__ == '__main__':
         model.load_state_dict(torch.load(chkp_name))
         model.eval()
 
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            print(name, param.data)
+    # for name, param in model.named_parameters():
+    #     if param.requires_grad:
+    #         print(name, param.data)
 
